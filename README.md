@@ -828,15 +828,364 @@ Retrieve this QC directory from the NAS on your local machine to analyze the res
 scp -r username@cluster:/path/to/AcaciaSenegal-RefTrans/Results/QC /path/to/working dorectory/on_your_laptop/
 ```
 
+# STEP 5 - <em>De Novo</em> Transcriptome Assembly
+
+## Overview
+
+Since no reference transcriptome is currently available for <em>Acacia senegal</em>, a <em>de novo</em> transcriptome assembly strategy was employed to reconstruct transcript sequences directly from Illumina RNA-seq reads.
+
+<em>De novo</em> assembly enables:
+
+- transcript reconstruction,
+- gene discovery,
+- identification of splice variants,
+- and downstream functional genomics analyses in non-model organisms.
+
+For this study, transcriptome assembly was performed using:
+
+- [Trinity](https://github.com/trinityrnaseq/trinityrnaseq/wiki?utm_source=chatgpt.com)
+
+Trinity is one of the most widely used and validated tools for de novo transcriptome assembly from Illumina RNA-seq data and is extensively cited in transcriptomics studies involving non-model plant species.
+
+## Trinity Assembly Strategy
+
+The assembly was conducted using paired-end trimmed reads generated after quality filtering and adapter removal.
+
+Input files:
+
+```bash
+data/trimmed/Acacia_R1_trimmed.fastq.gz
+data/trimmed/Acacia_R2_trimmed.fastq.gz
+```
+## Creating the Assembly Directory
+
+```bash
+mkdir -p results/Assembly/Trinity
+```
+## Running Trinity
+
+Create trinity_env to resolve Trinity module default 
 
 
+Open the nano text editor to edit a sbatch script
 
+```bash
+nano install_trinity.sh
+```
 
+save the following sbatch script
 
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=install_trinity
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=12:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/install_trinity_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/install_trinity_%j.err
+#SBATCH --nodelist=node06
 
+set -euo pipefail
 
+echo "======================================"
+echo " Trinity environment installation"
+echo "======================================"
 
+echo "Job started: $(date)"
 
+# -----------------------------
+# Variables
+# -----------------------------
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="trinity_env"
+
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+LOG_DIR="$PROJECT_DIR/logs"
+
+# -----------------------------
+# Create log directory
+# -----------------------------
+mkdir -p "$LOG_DIR"
+
+# -----------------------------
+# Check Miniforge installation
+# -----------------------------
+if [[ ! -d "$MINIFORGE_DIR" ]]; then
+
+    echo "ERROR: Miniforge directory not found:"
+    echo "$MINIFORGE_DIR"
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+
+# -----------------------------
+# Update conda
+# -----------------------------
+echo "Updating conda..."
+
+conda update -n base -c conda-forge conda -y
+
+# -----------------------------
+# Configure channels
+# -----------------------------
+echo "Configuring conda channels..."
+
+conda config --remove-key channels 2>/dev/null || true
+
+conda config --add channels conda-forge
+conda config --add channels bioconda
+conda config --add channels defaults
+
+conda config --set channel_priority strict
+
+# -----------------------------
+# Create Trinity environment
+# -----------------------------
+if conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "Environment $ENV_NAME already exists."
+
+else
+
+    echo "Creating Trinity environment..."
+
+    conda create \
+        -n "$ENV_NAME" \
+        -c conda-forge \
+        -c bioconda \
+        python=3.10 \
+        trinity \
+        salmon \
+        bowtie2 \
+        samtools \
+        jellyfish \
+        fastqc \
+        multiqc \
+        pigz \
+        -y
+
+fi
+
+# -----------------------------
+# Test Trinity installation
+# -----------------------------
+echo "Checking Trinity installation..."
+
+conda activate "$ENV_NAME"
+
+Trinity --version
+
+conda deactivate
+
+# -----------------------------
+# Create TMP directory
+# -----------------------------
+mkdir -p /scratch/name/tmp
+
+echo "======================================"
+echo " Trinity installation completed"
+echo "======================================"
+
+echo "Job finished: $(date)"
+```
+
+Run the script
+[Access install_trinity.sh](/Scripts/install_trinity.sh)
+
+```bash
+sbash install_trinity.sh
+```
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano Trinity.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=trinity_denovo
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=120G
+#SBATCH --time=5-00:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/trinity_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/trinity_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " Trinity de novo assembly started"
+echo "======================================"
+
+echo "Start time: $(date)"
+
+# -----------------------------
+# Variables
+# -----------------------------
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="trinity_env"
+
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+
+Trimmed_dir="$PROJECT_DIR/Data/Trimmed"
+
+Output_dir="$PROJECT_DIR/Results/Assembly/Trinity"
+
+Log_dir="$PROJECT_DIR/logs"
+
+TMP_DIR="/scratch/name/tmp/trinity_${SLURM_JOB_ID}"
+
+# -----------------------------
+# Create directories
+# -----------------------------
+mkdir -p \
+    "$Output_dir" \
+    "$Log_dir" \
+    "$TMP_DIR"
+
+# -----------------------------
+# Export temporary directory
+# -----------------------------
+export TMPDIR="$TMP_DIR"
+
+echo "Temporary directory:"
+echo "$TMP_DIR"
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+
+# -----------------------------
+# Check Trinity environment
+# -----------------------------
+if ! conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "ERROR: Conda environment '$ENV_NAME' not found."
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Activate Trinity environment
+# -----------------------------
+conda activate "$ENV_NAME"
+
+echo "Using Trinity version:"
+Trinity --version
+
+# -----------------------------
+# Check trimmed reads directory
+# -----------------------------
+if [[ ! -d "$Trimmed_dir" ]]; then
+
+    echo "ERROR: Trimmed reads directory not found:"
+    echo "$Trimmed_dir"
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Prepare paired-end reads
+# -----------------------------
+LEFT_READS=$(ls "$Trimmed_dir"/*_trimmed_1.fastq.gz | tr '\n' ',' | sed 's/,$//')
+
+RIGHT_READS=$(ls "$Trimmed_dir"/*_trimmed_2.fastq.gz | tr '\n' ',' | sed 's/,$//')
+
+# -----------------------------
+# Check reads existence
+# -----------------------------
+if [[ -z "$LEFT_READS" || -z "$RIGHT_READS" ]]; then
+
+    echo "ERROR: No paired trimmed reads found."
+
+    exit 1
+
+fi
+
+echo "--------------------------------------"
+echo "Left reads:"
+echo "$LEFT_READS"
+
+echo "--------------------------------------"
+echo "Right reads:"
+echo "$RIGHT_READS"
+
+# -----------------------------
+# Trinity assembly
+# -----------------------------
+echo "--------------------------------------"
+echo "Running Trinity assembly..."
+echo "--------------------------------------"
+
+Trinity \
+    --seqType fq \
+    --max_memory 100G \
+    --left "$LEFT_READS" \
+    --right "$RIGHT_READS" \
+    --CPU 16 \
+    --min_contig_length 300 \
+    --output "$Output_dir" \
+    --full_cleanup \
+    --verbose
+
+# -----------------------------
+# Check final assembly
+# -----------------------------
+FINAL_FASTA="${Output_dir}.Trinity.fasta"
+
+if [[ -f "$FINAL_FASTA" ]]; then
+
+    echo "--------------------------------------"
+    echo " Trinity assembly completed successfully"
+    echo "Final assembly:"
+    echo "$FINAL_FASTA"
+
+else
+
+    echo "ERROR: Trinity assembly failed."
+
+    exit 1
+
+fi
+
+echo "======================================"
+echo " Trinity de novo assembly completed"
+echo "======================================"
+
+echo "End time: $(date)"
+
+# -----------------------------
+# Cleanup temporary files
+# -----------------------------
+echo "Cleaning temporary directory..."
+
+rm -rf "$TMP_DIR"
+
+echo "Temporary files removed."
+```
+
+Run the script
+[Access Trinity.sh](/Scripts/Trinity.sh)
+
+```bash
+sbash Trinity.sh
+```
 
 
 
