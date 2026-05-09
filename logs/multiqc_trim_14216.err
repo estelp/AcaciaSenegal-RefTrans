@@ -1,0 +1,8 @@
+
+/// MultiQC 🔍 v1.34
+
+       file_search | Search path: /scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Trim
+            fastqc | Found 2 reports
+     write_results | Data        : Results/QC/MultiQC_Trim/multiqc_data
+     write_results | Report      : Results/QC/MultiQC_Trim/multiqc_report.html
+           multiqc | MultiQC complete

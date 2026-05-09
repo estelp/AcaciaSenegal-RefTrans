@@ -1,0 +1,3 @@
+Sample	Unique Reads	Duplicate Reads
+NG-32606_RNA_Acacia_lib675143_10197_1_trimmed_1	20572965.0	48192739.0
+NG-32606_RNA_Acacia_lib675143_10197_1_trimmed_2	19350119.0	49415585.0

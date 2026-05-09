@@ -1,0 +1,3 @@
+Sample	fastqc-percent_duplicates	fastqc-percent_gc	fastqc-avg_sequence_length	fastqc-median_sequence_length	fastqc-percent_fails	fastqc-total_sequences
+NG-32606_RNA_Acacia_lib675143_10197_1_trimmed_1	70.08252215348865	44.0	150.28916484298625	151	9.090909090909092	68.765704
+NG-32606_RNA_Acacia_lib675143_10197_1_trimmed_2	71.86080021287908	45.0	150.25928443923152	151	18.181818181818183	68.765704

@@ -479,6 +479,8 @@ fastp was selected due to its:
 - automatic adapter detection,
 - and widespread adoption in modern RNA-seq workflows.
 
+## Running Fastp
+
 Move to the Scripts directory
 
 ```bash
@@ -602,28 +604,9 @@ Run the script
 sbash fastp_trim.sh
 ```
 
-At the end of the task, check the contents
+## Quality Control of Trim Reads
 
-```bash
-ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw/
-
-# STEP 2 - Quality Control of Raw Reads
-
-Initial quality assessment of raw RNA-seq reads was performed using:
-
-- [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/?utm_source=chatgpt.com)
-- [MultiQC](https://multiqc.info/?utm_source=chatgpt.com)
-
-The objective of this step is to evaluate:
-
-- per-base sequence quality,
-- GC content distribution,
-- adapter contamination,
-- duplicated reads,
-- sequence length distribution,
-- and overrepresented sequences.
-
-## Running FastQC
+### Running FastQC
 
 Move to the created directory
 
@@ -634,18 +617,18 @@ cd /path/to/AcaciaSenegal-RefTrans/Scripts
 Open nano text editor
 
 ```bash
-nano FastQC_Raw.sh
+nano FastQC_Trim.sh
 ```
 save the following sbatch script
 
 ```bash
 #!/bin/bash
 #------Slurm configuration------
-#SBATCH --job-name=fastqc_raw
+#SBATCH --job-name=fastqc_trim
 #SBATCH --partition=normal
 #SBATCH --cpus-per-task=12
-#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/fastqc_raw_%j.out
-#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/fastqc_raw_%j.err
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/fastqc_trim_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/fastqc_trim_%j.err
 #SBATCH --nodelist=node06
 
 # Stop script if error
@@ -656,8 +639,8 @@ module load bioinfo-wave
 module load FastQC/0.12.1
 
 # Directories
-Input_dir="/scratch/name/AcaciaSenegal-RefTrans/Data/Raw"
-Output_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw"
+Input_dir="/scratch/name/AcaciaSenegal-RefTrans/Data/Trimmed"
+Output_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Trim"
 
 # Create output directory
 mkdir -p "$Output_dir"
@@ -694,181 +677,29 @@ echo "FastQC analysis completed: $(date)"
 ```
 
 Run the script 
-[Access FastqQC_Raw.sh](/Scripts/FastQC_Raw.sh)
+[Access FastqQC_Trim.sh](/Scripts/FastQC_Trim.sh)
 
 ```bash
-sbash FastQC_Raw.sh
+sbash FastQC_Trim.sh
 ```
 
 At the end of the task, check the contents
 
 ```bash
-ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw/
+ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/FastQC_Trim/
 ```
 
 Use generated html files to check read quality
 
 
-## MultiQC
+### MultiQC
 
-This step consolidates the html reports from FastQC into a single, easy-to-interpret report. To do this
-
-Create the “MultiQC” directory in the QC directory for outputs 
-
-
-```bash
-mkdir -p /path/to/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw
-```
-
-Create multiqc_env to resolve MultiQC module default 
-
-
-Open the nano text editor to edit a sbatch script
-
-```bash
-nano install_multiqc.sh
-```
-
-save the following sbatch script
-
-```bash
-#!/bin/bash
-#------ Slurm configuration ------
-#SBATCH --job-name=install_multiqc
-#SBATCH --partition=normal
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=8G
-#SBATCH --time=04:00:00
-#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/install_multiqc_%j.out
-#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/install_multiqc_%j.err
-#SBATCH --nodelist=node06
-
-set -euo pipefail
-
-echo "======================================"
-echo " Miniforge + MultiQC installation"
-echo "======================================"
-
-echo "Job started: $(date)"
-
-# -----------------------------
-# Variables
-# -----------------------------
-INSTALLER="$HOME/Miniforge3-Linux-x86_64.sh"
-MINIFORGE_DIR="$HOME/miniforge3"
-ENV_NAME="multiqc_env"
-LOG_DIR="/scratch/name/AcaciaSenegal-RefTrans/logs"
-
-# -----------------------------
-# Create log directory
-# -----------------------------
-mkdir -p "$LOG_DIR"
-
-# -----------------------------
-# Check wget availability
-# -----------------------------
-if ! command -v wget &> /dev/null; then
-    echo "ERROR: wget is not installed or not available."
-    exit 1
-fi
-
-# -----------------------------
-# Download Miniforge installer
-# -----------------------------
-echo "Downloading Miniforge installer..."
-
-wget -qO "$INSTALLER" \
-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
-
-chmod +x "$INSTALLER"
-
-# -----------------------------
-# Install Miniforge
-# -----------------------------
-if [[ ! -d "$MINIFORGE_DIR" ]]; then
-
-    echo "Installing Miniforge..."
-
-    bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
-
-else
-
-    echo "Miniforge already installed."
-
-fi
-
-# -----------------------------
-# Load conda
-# -----------------------------
-source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
-
-# -----------------------------
-# Update conda
-# -----------------------------
-echo "Updating conda..."
-
-conda update -n base -c conda-forge conda -y
-
-# -----------------------------
-# Configure conda channels
-# -----------------------------
-echo "Configuring conda channels..."
-
-conda config --remove-key channels 2>/dev/null || true
-
-conda config --add channels conda-forge
-conda config --add channels bioconda
-conda config --add channels defaults
-
-conda config --set channel_priority strict
-
-# -----------------------------
-# Create MultiQC environment
-# -----------------------------
-if conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
-
-    echo "Environment $ENV_NAME already exists."
-
-else
-
-    echo "Creating environment: $ENV_NAME"
-
-    conda create \
-        -n "$ENV_NAME" \
-        -c conda-forge \
-        -c bioconda \
-        python=3.12 \
-        multiqc \
-	setuptools \
-        -y
-
-fi
-
-# -----------------------------
-# Cleanup installer
-# -----------------------------
-rm -f "$INSTALLER"
-
-echo "======================================"
-echo " Installation completed successfully"
-echo "======================================"
-
-echo "Job finished: $(date)"
-
-```
-
-Run the script
-[Access install_multiqc.sh](/Scripts/install_multiqc.sh)
-
-```bash
-sbash install_multiqc.sh
-```
 Run MultiQC analysis on fastqc html files
 
 Open the nano text editor to edit a sbatch script
 
 ```bash
-nano MultiQC_Raw.sh
+nano MultiQC_Trim.sh
 ```
 
 save the following sbatch script
@@ -876,13 +707,13 @@ save the following sbatch script
 ```bash
 #!/bin/bash
 #------ Slurm configuration ------
-#SBATCH --job-name=multiqc_raw
+#SBATCH --job-name=multiqc_trim
 #SBATCH --partition=normal
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=8G
 #SBATCH --time=02:00:00
-#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_raw_%j.out
-#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_raw_%j.err
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_trim_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_trim_%j.err
 #SBATCH --nodelist=node06
 
 set -euo pipefail
@@ -899,8 +730,8 @@ echo "Start time: $(date)"
 MINIFORGE_DIR="$HOME/miniforge3"
 ENV_NAME="multiqc_env"
 
-Fastqc_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw"
-Multiqc_out="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw"
+Fastqc_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Trim"
+Multiqc_out="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Trim"
 Log_dir="/scratch/name/AcaciaSenegal-RefTrans/logs"
 
 # -----------------------------
@@ -970,16 +801,16 @@ echo "End time: $(date)"
 ```
 
 Run the script
-[Access MultiQC_Raw.sh](/Scripts/MultiQC_Raw.sh)
+[Access MultiQC_Trim.sh](/Scripts/MultiQC_Trim.sh)
 
 ```bash
-sbash MultiQC_Raw.sh
+sbash MultiQC_Trim.sh
 ```
 
 At the end of the task, check the contents
 
 ```bash
-ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw/
+ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Trim/
 ```
 
 Use generated html files to check read quality

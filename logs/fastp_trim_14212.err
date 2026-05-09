@@ -1,0 +1,49 @@
+Detecting adapter sequence for read1...
+>Illumina TruSeq Adapter Read 1
+AGATCGGAAGAGCACACGTCTGAACTCCAGTCA
+
+Detecting adapter sequence for read2...
+>Illumina TruSeq Adapter Read 2
+AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT
+
+Read1 before filtering:
+total reads: 69367743
+total bases: 10474529193
+Q20 bases: 10206485112(97.441%)
+Q30 bases: 9758990943(93.1688%)
+
+Read2 before filtering:
+total reads: 69367743
+total bases: 10474529193
+Q20 bases: 10076389685(96.199%)
+Q30 bases: 9443402966(90.1559%)
+
+Read1 after filtering:
+total reads: 68765704
+total bases: 10334564036
+Q20 bases: 10094504114(97.6771%)
+Q30 bases: 9660845732(93.4809%)
+
+Read2 aftering filtering:
+total reads: 68765704
+total bases: 10332304200
+Q20 bases: 9979231488(96.5828%)
+Q30 bases: 9364193074(90.6302%)
+
+Filtering result:
+reads passed filter: 137531408
+reads failed due to low quality: 1103468
+reads failed due to too many N: 13290
+reads failed due to too short: 87320
+reads with adapter trimmed: 4384827
+bases trimmed due to adapters: 90737035
+
+Duplication rate: 34.9717%
+
+Insert size peak (evaluated by paired-end reads): 263
+
+JSON report: /scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastP/NG-32606_RNA_Acacia_lib675143_10197_1_fastp.json
+HTML report: /scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastP/NG-32606_RNA_Acacia_lib675143_10197_1_fastp.html
+
+fastp --in1 /scratch/name/AcaciaSenegal-RefTrans/Data/Raw/NG-32606_RNA_Acacia_lib675143_10197_1_1.fastq.gz --in2 /scratch/name/AcaciaSenegal-RefTrans/Data/Raw/NG-32606_RNA_Acacia_lib675143_10197_1_2.fastq.gz --out1 /scratch/name/AcaciaSenegal-RefTrans/Data/Trimmed/NG-32606_RNA_Acacia_lib675143_10197_1_trimmed_1.fastq.gz --out2 /scratch/name/AcaciaSenegal-RefTrans/Data/Trimmed/NG-32606_RNA_Acacia_lib675143_10197_1_trimmed_2.fastq.gz --thread 12 --detect_adapter_for_pe --trim_poly_g --cut_front --cut_tail --cut_window_size 4 --cut_mean_quality 20 --length_required 50 --json /scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastP/NG-32606_RNA_Acacia_lib675143_10197_1_fastp.json --html /scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastP/NG-32606_RNA_Acacia_lib675143_10197_1_fastp.html --report_title NG-32606_RNA_Acacia_lib675143_10197_1 fastp report 
+fastp v0.20.1, time used: 615 seconds
