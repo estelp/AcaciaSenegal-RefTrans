@@ -93,6 +93,538 @@ The objective of this step is to evaluate:
 
 ## Running FastQC
 
+Move to the Scripts directory
+
+```bash
+cd /path/to/AcaciaSenegal-RefTrans/Scripts
+```
+
+Open nano text editor
+
+```bash
+nano FastQC_Raw.sh
+```
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------Slurm configuration------
+#SBATCH --job-name=fastqc_raw
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/fastqc_raw_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/fastqc_raw_%j.err
+#SBATCH --nodelist=node06
+
+# Stop script if error
+set -euo pipefail
+
+# Modules loading
+module load bioinfo-wave
+module load FastQC/0.12.1
+
+# Directories
+Input_dir="/scratch/name/AcaciaSenegal-RefTrans/Data/Raw"
+Output_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw"
+
+# Create output directory
+mkdir -p "$Output_dir"
+
+echo "FastQC analysis started: $(date)"
+
+# Loop on forward reads
+for R1 in "$Input_dir"/*_1.fastq.gz; do
+
+    # Sample basename
+    base=$(basename "$R1" _1.fastq.gz)
+
+    # Reverse read
+    R2="$Input_dir/${base}_2.fastq.gz"
+
+    # Check if R2 exists
+    if [[ ! -f "$R2" ]]; then
+        echo "Missing pair for sample: $base"
+        continue
+    fi
+
+    echo "Processing sample: $base"
+
+    # Run FastQC
+    fastqc \
+        --threads 12 \
+        --outdir "$Output_dir" \
+        "$R1" "$R2"
+
+done
+
+echo "FastQC analysis completed: $(date)"
+
+```
+
+Run the script 
+[Access FastqQC_Raw.sh](/Scripts/FastQC_Raw.sh)
+
+```bash
+sbash FastQC_Raw.sh
+```
+
+At the end of the task, check the contents
+
+```bash
+ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw/
+```
+
+Use generated html files to check read quality
+
+
+## MultiQC
+
+This step consolidates the html reports from FastQC into a single, easy-to-interpret report. To do this
+
+Create the “MultiQC” directory in the QC directory for outputs 
+
+
+```bash
+mkdir -p /path/to/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw
+```
+
+Create multiqc_env to resolve MultiQC module default 
+
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano install_multiqc.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=install_multiqc
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=04:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/install_multiqc_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/install_multiqc_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " Miniforge + MultiQC installation"
+echo "======================================"
+
+echo "Job started: $(date)"
+
+# -----------------------------
+# Variables
+# -----------------------------
+INSTALLER="$HOME/Miniforge3-Linux-x86_64.sh"
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="multiqc_env"
+LOG_DIR="/scratch/name/AcaciaSenegal-RefTrans/logs"
+
+# -----------------------------
+# Create log directory
+# -----------------------------
+mkdir -p "$LOG_DIR"
+
+# -----------------------------
+# Check wget availability
+# -----------------------------
+if ! command -v wget &> /dev/null; then
+    echo "ERROR: wget is not installed or not available."
+    exit 1
+fi
+
+# -----------------------------
+# Download Miniforge installer
+# -----------------------------
+echo "Downloading Miniforge installer..."
+
+wget -qO "$INSTALLER" \
+https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+
+chmod +x "$INSTALLER"
+
+# -----------------------------
+# Install Miniforge
+# -----------------------------
+if [[ ! -d "$MINIFORGE_DIR" ]]; then
+
+    echo "Installing Miniforge..."
+
+    bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
+
+else
+
+    echo "Miniforge already installed."
+
+fi
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+
+# -----------------------------
+# Update conda
+# -----------------------------
+echo "Updating conda..."
+
+conda update -n base -c conda-forge conda -y
+
+# -----------------------------
+# Configure conda channels
+# -----------------------------
+echo "Configuring conda channels..."
+
+conda config --remove-key channels 2>/dev/null || true
+
+conda config --add channels conda-forge
+conda config --add channels bioconda
+conda config --add channels defaults
+
+conda config --set channel_priority strict
+
+# -----------------------------
+# Create MultiQC environment
+# -----------------------------
+if conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "Environment $ENV_NAME already exists."
+
+else
+
+    echo "Creating environment: $ENV_NAME"
+
+    conda create \
+        -n "$ENV_NAME" \
+        -c conda-forge \
+        -c bioconda \
+        python=3.12 \
+        multiqc \
+	setuptools \
+        -y
+
+fi
+
+# -----------------------------
+# Cleanup installer
+# -----------------------------
+rm -f "$INSTALLER"
+
+echo "======================================"
+echo " Installation completed successfully"
+echo "======================================"
+
+echo "Job finished: $(date)"
+
+```
+
+Run the script
+[Access install_multiqc.sh](/Scripts/install_multiqc.sh)
+
+```bash
+sbash install_multiqc.sh
+```
+Run MultiQC analysis on fastqc html files
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano MultiQC_Raw.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=multiqc_raw
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=8G
+#SBATCH --time=02:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_raw_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_raw_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " MultiQC analysis started"
+echo "======================================"
+
+echo "Start time: $(date)"
+
+# -----------------------------
+# Variables
+# -----------------------------
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="multiqc_env"
+
+Fastqc_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw"
+Multiqc_out="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw"
+Log_dir="/scratch/name/AcaciaSenegal-RefTrans/logs"
+
+# -----------------------------
+# Create directories
+# -----------------------------
+mkdir -p "$Multiqc_out" "$Log_dir"
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+
+# -----------------------------
+# Check conda environment
+# -----------------------------
+if ! conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "ERROR: Conda environment '$ENV_NAME' not found."
+    echo "Please run the installation script first."
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Activate environment
+# -----------------------------
+conda activate "$ENV_NAME"
+
+# -----------------------------
+# Check FastQC directory
+# -----------------------------
+if [[ ! -d "$Fastqc_dir" ]]; then
+
+    echo "ERROR: FastQC directory not found:"
+    echo "$Fastqc_dir"
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Check FastQC reports
+# -----------------------------
+if ! ls "$Fastqc_dir"/*_fastqc.zip >/dev/null 2>&1; then
+
+    echo "ERROR: No FastQC reports found in:"
+    echo "$Fastqc_dir"
+
+    exit 1
+
+fi
+
+echo "Running MultiQC on FastQC results..."
+
+# -----------------------------
+# Run MultiQC
+# -----------------------------
+multiqc "$Fastqc_dir" \
+    --outdir "$Multiqc_out"
+
+echo "======================================"
+echo " MultiQC analysis completed"
+echo "======================================"
+
+echo "End time: $(date)"
+```
+
+Run the script
+[Access MultiQC_Raw.sh](/Scripts/MultiQC_Raw.sh)
+
+```bash
+sbash MultiQC_Raw.sh
+```
+
+At the end of the task, check the contents
+
+```bash
+ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw/
+```
+
+Use generated html files to check read quality
+
+For the next step,
+Move the entire contents of the QC directory to the NAS
+
+```bash
+scp -r /path/to/AcaciaSenegal-RefTrans/Results/QC san:/home/name/
+```
+
+Retrieve this QC directory from the NAS on your local machine to analyze the results
+
+```bash
+scp -r username@cluster:/path/to/AcaciaSenegal-RefTrans/Results/QC /path/to/working dorectory/on_your_laptop/
+```
+
+# STEP 3 - Read Preprocessing and Trimming
+
+Read trimming and filtering were performed using:
+
+
+- [fastp](https://github.com/OpenGene/fastp?utm_source=chatgpt.com)
+
+fastp was selected due to its:
+
+- high speed,
+- integrated quality control,
+- automatic adapter detection,
+- and widespread adoption in modern RNA-seq workflows.
+
+Move to the Scripts directory
+
+```bash
+cd /path/to/AcaciaSenegal-RefTrans/Scripts
+```
+
+Open nano text editor
+
+```bash
+nano fastp_trim.sh
+```
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=fastp_trim
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=16G
+#SBATCH --time=08:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/fastp_trim_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/fastp_trim_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " fastp trimming started"
+echo "======================================"
+
+echo "Start time: $(date)"
+
+# -----------------------------
+# Modules
+# -----------------------------
+module load bioinfo-wave
+module load fastp/0.20.1
+
+# -----------------------------
+# Directories
+# -----------------------------
+Input_dir="/scratch/name/AcaciaSenegal-RefTrans/Data/Raw"
+Trimmed_dir="/scratch/name/AcaciaSenegal-RefTrans/Data/Trimmed"
+Report_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastP"
+Log_dir="/scratch/name/AcaciaSenegal-RefTrans/logs"
+
+# -----------------------------
+# Create directories
+# -----------------------------
+mkdir -p \
+    "$Trimmed_dir" \
+    "$Report_dir" \
+    "$Log_dir"
+
+# -----------------------------
+# Loop through samples
+# -----------------------------
+for R1 in "$Input_dir"/*_1.fastq.gz; do
+
+    # Sample basename
+    base=$(basename "$R1" _1.fastq.gz)
+
+    # Mate pair
+    R2="$Input_dir/${base}_2.fastq.gz"
+
+    # Check R2 existence
+    if [[ ! -f "$R2" ]]; then
+
+        echo "Missing pair for sample: $base"
+
+        continue
+
+    fi
+
+    echo "--------------------------------------"
+    echo "Processing sample: $base"
+
+    # Output files
+    OUT1="$Trimmed_dir/${base}_trimmed_1.fastq.gz"
+    OUT2="$Trimmed_dir/${base}_trimmed_2.fastq.gz"
+
+    JSON="$Report_dir/${base}_fastp.json"
+    HTML="$Report_dir/${base}_fastp.html"
+
+    # -----------------------------
+    # Run fastp
+    # -----------------------------
+    fastp \
+        --in1 "$R1" \
+        --in2 "$R2" \
+        --out1 "$OUT1" \
+        --out2 "$OUT2" \
+        --thread 12 \
+        --detect_adapter_for_pe \
+        --trim_poly_g \
+        --cut_front \
+        --cut_tail \
+        --cut_window_size 4 \
+        --cut_mean_quality 20 \
+        --length_required 50 \
+        --json "$JSON" \
+        --html "$HTML" \
+        --report_title "$base fastp report"
+
+    echo "Sample completed: $base"
+
+done
+
+echo "======================================"
+echo " fastp trimming completed"
+echo "======================================"
+
+echo "End time: $(date)"
+```
+
+Run the script 
+[Access fatsp_trim.sh](/Scripts/fastp_trim.sh)
+
+```bash
+sbash fastp_trim.sh
+```
+
+At the end of the task, check the contents
+
+```bash
+ls -lh /path/to/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw/
+
+# STEP 2 - Quality Control of Raw Reads
+
+Initial quality assessment of raw RNA-seq reads was performed using:
+
+- [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/?utm_source=chatgpt.com)
+- [MultiQC](https://multiqc.info/?utm_source=chatgpt.com)
+
+The objective of this step is to evaluate:
+
+- per-base sequence quality,
+- GC content distribution,
+- adapter contamination,
+- duplicated reads,
+- sequence length distribution,
+- and overrepresented sequences.
+
+## Running FastQC
+
 Move to the created directory
 
 ```bash
@@ -201,6 +733,15 @@ save the following sbatch script
 
 ```bash
 #!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=install_multiqc
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=04:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/install_multiqc_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/install_multiqc_%j.err
+#SBATCH --nodelist=node06
 
 set -euo pipefail
 
@@ -208,55 +749,111 @@ echo "======================================"
 echo " Miniforge + MultiQC installation"
 echo "======================================"
 
+echo "Job started: $(date)"
+
+# -----------------------------
 # Variables
+# -----------------------------
 INSTALLER="$HOME/Miniforge3-Linux-x86_64.sh"
 MINIFORGE_DIR="$HOME/miniforge3"
 ENV_NAME="multiqc_env"
+LOG_DIR="/scratch/name/AcaciaSenegal-RefTrans/logs"
 
+# -----------------------------
+# Create log directory
+# -----------------------------
+mkdir -p "$LOG_DIR"
+
+# -----------------------------
+# Check wget availability
+# -----------------------------
+if ! command -v wget &> /dev/null; then
+    echo "ERROR: wget is not installed or not available."
+    exit 1
+fi
+
+# -----------------------------
 # Download Miniforge installer
-echo "Downloading Miniforge..."
+# -----------------------------
+echo "Downloading Miniforge installer..."
 
-wget -q \
-https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
--O "$INSTALLER"
+wget -qO "$INSTALLER" \
+https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 
 chmod +x "$INSTALLER"
 
-# Install Miniforge if not already present
+# -----------------------------
+# Install Miniforge
+# -----------------------------
 if [[ ! -d "$MINIFORGE_DIR" ]]; then
+
     echo "Installing Miniforge..."
+
     bash "$INSTALLER" -b -p "$MINIFORGE_DIR"
+
 else
+
     echo "Miniforge already installed."
+
 fi
 
-# Load conda (without activating any env)
+# -----------------------------
+# Load conda
+# -----------------------------
 source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
 
+# -----------------------------
 # Update conda
+# -----------------------------
 echo "Updating conda..."
+
 conda update -n base -c conda-forge conda -y
 
-# Configure channels (best practice bioinfo)
-conda config --add channels defaults
-conda config --add channels bioconda
+# -----------------------------
+# Configure conda channels
+# -----------------------------
+echo "Configuring conda channels..."
+
+conda config --remove-key channels 2>/dev/null || true
+
 conda config --add channels conda-forge
+conda config --add channels bioconda
+conda config --add channels defaults
+
 conda config --set channel_priority strict
 
-# Create environment if not exists
-if ! conda env list | grep -q "multiqc_env"; then
-    echo "Creating conda environment: multiqc_env"
-    conda create -n multiqc_env python=3.8 multiqc=1.13 -y
+# -----------------------------
+# Create MultiQC environment
+# -----------------------------
+if conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "Environment $ENV_NAME already exists."
+
 else
-    echo "Environment multiqc_env already exists"
+
+    echo "Creating environment: $ENV_NAME"
+
+    conda create \
+        -n "$ENV_NAME" \
+        -c conda-forge \
+        -c bioconda \
+        python=3.12 \
+        multiqc \
+	setuptools \
+        -y
+
 fi
 
-# Cleanup
+# -----------------------------
+# Cleanup installer
+# -----------------------------
 rm -f "$INSTALLER"
 
 echo "======================================"
-echo " Installation finished"
+echo " Installation completed successfully"
 echo "======================================"
+
+echo "Job finished: $(date)"
 
 ```
 
@@ -278,50 +875,98 @@ save the following sbatch script
 
 ```bash
 #!/bin/bash
-#----Slurm configuration----
+#------ Slurm configuration ------
 #SBATCH --job-name=multiqc_raw
 #SBATCH --partition=normal
 #SBATCH --cpus-per-task=12
+#SBATCH --mem=8G
+#SBATCH --time=02:00:00
 #SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_raw_%j.out
 #SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/multiqc_raw_%j.err
 #SBATCH --nodelist=node06
 
 set -euo pipefail
 
-echo "MultiQC started: $(date)"
+echo "======================================"
+echo " MultiQC analysis started"
+echo "======================================"
+
+echo "Start time: $(date)"
 
 # -----------------------------
-# Conda activation
+# Variables
 # -----------------------------
-source ~/miniforge3/etc/profile.d/conda.sh
-conda activate multiqc_env
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="multiqc_env"
 
-# -----------------------------
-# Directories (MATCH FASTQC)
-# -----------------------------
 Fastqc_dir="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/FastQC_Raw"
 Multiqc_out="/scratch/name/AcaciaSenegal-RefTrans/Results/QC/MultiQC_Raw"
-
-mkdir -p "$Multiqc_out"
+Log_dir="/scratch/name/AcaciaSenegal-RefTrans/logs"
 
 # -----------------------------
-# Check input
+# Create directories
 # -----------------------------
-if [[ ! -d "$Fastqc_dir" ]]; then
-    echo "ERROR: FastQC directory not found: $Fastqc_dir"
+mkdir -p "$Multiqc_out" "$Log_dir"
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+
+# -----------------------------
+# Check conda environment
+# -----------------------------
+if ! conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "ERROR: Conda environment '$ENV_NAME' not found."
+    echo "Please run the installation script first."
+
     exit 1
+
 fi
 
-echo "Running MultiQC on: $Fastqc_dir"
+# -----------------------------
+# Activate environment
+# -----------------------------
+conda activate "$ENV_NAME"
+
+# -----------------------------
+# Check FastQC directory
+# -----------------------------
+if [[ ! -d "$Fastqc_dir" ]]; then
+
+    echo "ERROR: FastQC directory not found:"
+    echo "$Fastqc_dir"
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Check FastQC reports
+# -----------------------------
+if ! ls "$Fastqc_dir"/*_fastqc.zip >/dev/null 2>&1; then
+
+    echo "ERROR: No FastQC reports found in:"
+    echo "$Fastqc_dir"
+
+    exit 1
+
+fi
+
+echo "Running MultiQC on FastQC results..."
 
 # -----------------------------
 # Run MultiQC
 # -----------------------------
 multiqc "$Fastqc_dir" \
-    -o "$Multiqc_out" \
-    --threads 12
+    --outdir "$Multiqc_out"
 
-echo "MultiQC finished: $(date)"
+echo "======================================"
+echo " MultiQC analysis completed"
+echo "======================================"
+
+echo "End time: $(date)"
 ```
 
 Run the script
@@ -351,12 +996,6 @@ Retrieve this QC directory from the NAS on your local machine to analyze the res
 ```bash
 scp -r username@cluster:/path/to/AcaciaSenegal-RefTrans/Results/QC /path/to/working dorectory/on_your_laptop/
 ```
-
-
-
-
-
-
 
 
 
