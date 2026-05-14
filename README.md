@@ -1187,6 +1187,543 @@ Run the script
 sbash Trinity.sh
 ```
 
+## Trinity assembly statistics
+
+This step will generate statistics such as:
+- total number of transcripts
+- number of “genes”
+- N50
+- baverage length
+- GC%
+- longest transcript
+
+```bash
+source ~/miniforge3/etc/profile.d/conda.sh
+conda activate trinity_env
+TrinityStats.pl /scratch/name/AcaciaSenegal-RefTrans/Results/Assembly/Trinity.Trinity.fasta > ./Trinity_fasta_stats.txt
+cat /scratch/name/AcaciaSenegal-RefTrans/Results/Assembly/Trinity_fasta_stats.txt
+```
+Here are the assembly statistics for Trinity
+
+```
+################################ ## Counts of transcripts, etc. ################################ Total trinity 'genes': 64469 Total trinity transcripts: 150467 Percent GC: 40.27 ######################################## Stats based on ALL transcript contigs: ######################################## Contig N10: 4547 Contig N20: 3638 Contig N30: 3081 Contig N40: 2649 Contig N50: 2280 Median contig length: 1223 Average contig: 1565.65 Total assembled bases: 235578723 ##################################################### ## Stats based on ONLY LONGEST ISOFORM per 'GENE': ##################################################### Contig N10: 4614 Contig N20: 3682 Contig N30: 3077 Contig N40: 2573 Contig N50: 2103 Median contig length: 684 Average contig: 1215.75 Total assembled bases: 78378312
+```
+
+# STEP 6 - Assembly Validation
+
+## Experimental validation - read remapping
+
+The goal is to realign the cleaned reads to “Trinity.Trinity.fasta” in order to evaluate:
+- transcript representation,
+- overall assembly quality,
+- biological consistency,
+- alignment rates.
+
+Why is this scientifically important? A good transcriptome must:
+- recover the majority of reads,
+- achieve a high alignment rate,
+- demonstrate that the reconstructed transcripts are supported by the data.
+
+General interpretation
+| Alignment rate | Interpretation |
+| -------------- | -------------- |
+| <70%           | poor assembly  |
+| 70–80%         | acceptable     |
+| 80–90%         | good           |
+| >90%           | excellent      |
+
+### Running
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano read_remapping.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=trinity_remap
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=80G
+#SBATCH --time=3-00:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/remap_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/remap_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " Trinity read remapping started"
+echo "======================================"
+
+echo "Start time: $(date)"
+
+# -----------------------------
+# Variables
+# -----------------------------
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="trinity_env"
+
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+
+TRIMMED_DIR="$PROJECT_DIR/Data/Trimmed"
+
+ASSEMBLY_DIR="$PROJECT_DIR/Results/Assembly"
+
+MAPPING_DIR="$PROJECT_DIR/Results/Read_Remapping"
+
+LOG_DIR="$PROJECT_DIR/logs"
+
+TMP_DIR="/scratch/name/tmp/remap_${SLURM_JOB_ID}"
+
+ASSEMBLY_FASTA="$ASSEMBLY_DIR/Trinity.Trinity.fasta"
+
+INDEX_PREFIX="$MAPPING_DIR/Trinity_index"
+
+SAM_FILE="$MAPPING_DIR/Trinity_remap.sam"
+
+BAM_FILE="$MAPPING_DIR/Trinity_remap.sorted.bam"
+
+# -----------------------------
+# Create directories
+# -----------------------------
+mkdir -p \
+    "$MAPPING_DIR" \
+    "$LOG_DIR" \
+    "$TMP_DIR"
+
+# -----------------------------
+# Export temporary directory
+# -----------------------------
+export TMPDIR="$TMP_DIR"
+
+echo "Temporary directory:"
+echo "$TMP_DIR"
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+
+# -----------------------------
+# Check Trinity environment
+# -----------------------------
+if ! conda env list | grep -qE "^${ENV_NAME}[[:space:]]"; then
+
+    echo "ERROR: Conda environment '$ENV_NAME' not found."
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Activate Trinity environment
+# -----------------------------
+conda activate "$ENV_NAME"
+
+echo "Using Bowtie2 version:"
+bowtie2 --version
+
+echo "Using Samtools version:"
+samtools --version | head -n 1
+
+# -----------------------------
+# Check assembly fasta
+# -----------------------------
+if [[ ! -f "$ASSEMBLY_FASTA" ]]; then
+
+    echo "ERROR: Trinity assembly not found:"
+    echo "$ASSEMBLY_FASTA"
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Prepare paired-end reads
+# -----------------------------
+LEFT_READS=$(ls "$TRIMMED_DIR"/*_trimmed_1.fastq.gz | tr '\n' ',' | sed 's/,$//')
+
+RIGHT_READS=$(ls "$TRIMMED_DIR"/*_trimmed_2.fastq.gz | tr '\n' ',' | sed 's/,$//')
+
+# -----------------------------
+# Check reads existence
+# -----------------------------
+if [[ -z "$LEFT_READS" || -z "$RIGHT_READS" ]]; then
+
+    echo "ERROR: No paired trimmed reads found."
+
+    exit 1
+
+fi
+
+echo "--------------------------------------"
+echo "Left reads:"
+echo "$LEFT_READS"
+
+echo "--------------------------------------"
+echo "Right reads:"
+echo "$RIGHT_READS"
+
+# -----------------------------
+# Build Bowtie2 index
+# -----------------------------
+echo "--------------------------------------"
+echo "Building Bowtie2 index..."
+echo "--------------------------------------"
+
+bowtie2-build \
+    "$ASSEMBLY_FASTA" \
+    "$INDEX_PREFIX"
+
+# -----------------------------
+# Read remapping
+# -----------------------------
+echo "--------------------------------------"
+echo "Running Bowtie2 alignment..."
+echo "--------------------------------------"
+
+bowtie2 \
+    -x "$INDEX_PREFIX" \
+    -1 "$LEFT_READS" \
+    -2 "$RIGHT_READS" \
+    -S "$SAM_FILE" \
+    -p 12 \
+    2> "$MAPPING_DIR/bowtie2_alignment_stats.txt"
+
+# -----------------------------
+# Convert SAM to sorted BAM
+# -----------------------------
+echo "--------------------------------------"
+echo "Converting SAM to sorted BAM..."
+echo "--------------------------------------"
+
+samtools view \
+    -@ 12 \
+    -bS "$SAM_FILE" | \
+samtools sort \
+    -@ 12 \
+    -o "$BAM_FILE"
+
+# -----------------------------
+# Index BAM
+# -----------------------------
+echo "--------------------------------------"
+echo "Indexing BAM file..."
+echo "--------------------------------------"
+
+samtools index "$BAM_FILE"
+
+# -----------------------------
+# Remove SAM file
+# -----------------------------
+echo "Removing SAM file..."
+
+rm -f "$SAM_FILE"
+
+# -----------------------------
+# Final checks
+# -----------------------------
+if [[ -f "$BAM_FILE" ]]; then
+
+    echo "--------------------------------------"
+    echo " Read remapping completed successfully"
+    echo "Final BAM:"
+    echo "$BAM_FILE"
+
+else
+
+    echo "ERROR: BAM file was not generated."
+
+    exit 1
+
+fi
+
+echo "======================================"
+echo " Trinity read remapping completed"
+echo "======================================"
+
+echo "End time: $(date)"
+
+# -----------------------------
+# Cleanup temporary files
+# -----------------------------
+echo "Cleaning temporary directory..."
+
+rm -rf "$TMP_DIR"
+
+echo "Temporary files removed."
+
+```
+
+Run the script
+[Access read_remapping.sh](/Scripts/read_remapping.sh)
+
+```bash
+sbash read_remapping.sh
+```
+
+Check output and appreciate 
+
+```bash
+cat /scratch/name/AcaciaSenegal-RefTrans/Results/Read_Remapping/bowtie2_alignment_stats.txt
+```
+
+```
+68765704 reads; of these:
+  68765704 (100.00%) were paired; of these:
+    6343100 (9.22%) aligned concordantly 0 times
+    14566317 (21.18%) aligned concordantly exactly 1 time
+    47856287 (69.59%) aligned concordantly >1 times
+    ----
+    6343100 pairs aligned concordantly 0 times; of these:
+      603201 (9.51%) aligned discordantly 1 time
+    ----
+    5739899 pairs aligned 0 times concordantly or discordantly; of these:
+      11479798 mates make up the pairs; of these:
+        2459466 (21.42%) aligned 0 times
+        1231691 (10.73%) aligned exactly 1 time
+        7788641 (67.85%) aligned >1 times
+98.21% overall alignment rate
+```
+
+98.21% overall alignment rate
+This is a very strong indicator that the transcriptome accurately represents the RNA-seq data
+
+What this means biologically? THe assembly:
+- accurately captures the expressed transcriptome
+- contains the majority of biological transcripts
+- is consistent with the experimental data
+- provides an excellent representation of the reads
+
+```
+69.59% aligned concordantly >1 times
+```
+This means there has been a significant amount of multimapping. And that’s normal with Trinity.
+Because a Trinity transcriptome contains:
+- multiple isoforms,
+- redundant transcripts,
+- closely related gene families,
+- partial fragments.
+Therefore, this result confirms that filtering/reducing redundancy will be necessary later on.
+
+## BUSCO Assessment of Transcriptome Completeness
+
+### Why?
+
+BUSCO analysis will be performed to evaluate the completeness and biological quality of the assembled Acacia senegal transcriptome using the embryophyta_odb10 plant lineage dataset.
+BUSCO identifies highly conserved single-copy orthologous genes expected to be present in most plant species and classifies them as complete, duplicated, fragmented, or missing. This analysis provides an important measure of transcriptome completeness and assembly reliability.
+The BUSCO assessment serves as a key validation step before downstream analyses such as transcript filtering, coding sequence prediction, and functional annotation.
+
+### Running
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano busco_assessment.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=busco_acacia
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=80G
+#SBATCH --time=3-00:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/busco_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/busco_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " BUSCO transcriptome assessment started"
+echo "======================================"
+
+echo "Start time: $(date)"
+
+# -----------------------------
+# Load modules
+# -----------------------------
+module load bioinfo-wave
+module load singularity/4.0.1
+module load busco/5.5.0
+
+# -----------------------------
+# Variables
+# -----------------------------
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+
+ASSEMBLY_DIR="$PROJECT_DIR/Results/Assembly"
+
+BUSCO_DIR="$PROJECT_DIR/Results/BUSCO"
+
+DATABASE_DIR="$PROJECT_DIR/Database/BUSCO"
+
+LOG_DIR="$PROJECT_DIR/logs"
+
+TMP_DIR="/scratch/name/tmp/busco_${SLURM_JOB_ID}"
+
+ASSEMBLY_FASTA="$ASSEMBLY_DIR/Trinity.Trinity.fasta"
+
+LINEAGE="embryophyta_odb10"
+
+OUTPUT_NAME="busco_acacia"
+
+# -----------------------------
+# Create directories
+# -----------------------------
+mkdir -p \
+    "$BUSCO_DIR" \
+    "$DATABASE_DIR" \
+    "$LOG_DIR" \
+    "$TMP_DIR"
+
+# -----------------------------
+# Export temporary directory
+# -----------------------------
+export TMPDIR="$TMP_DIR"
+
+echo "Temporary directory:"
+echo "$TMP_DIR"
+
+# -----------------------------
+# Check assembly fasta
+# -----------------------------
+if [[ ! -f "$ASSEMBLY_FASTA" ]]; then
+
+    echo "ERROR: Assembly fasta file not found:"
+    echo "$ASSEMBLY_FASTA"
+
+    exit 1
+
+fi
+
+# -----------------------------
+# Display BUSCO version
+# -----------------------------
+echo "Using BUSCO version:"
+busco --version
+
+# -----------------------------
+# Download BUSCO lineage dataset
+# -----------------------------
+echo "--------------------------------------"
+echo "Checking BUSCO lineage dataset..."
+echo "--------------------------------------"
+
+if [[ ! -d "$DATABASE_DIR/lineages/$LINEAGE" ]]; then
+
+    echo "Downloading BUSCO lineage dataset: $LINEAGE"
+
+    busco \
+        --download "$LINEAGE" \
+        --download_path "$DATABASE_DIR"
+
+else
+
+    echo "BUSCO lineage dataset already exists."
+
+fi
+
+# -----------------------------
+# Run BUSCO
+# -----------------------------
+echo "--------------------------------------"
+echo "Running BUSCO assessment..."
+echo "--------------------------------------"
+
+busco \
+    -i "$ASSEMBLY_FASTA" \
+    -l "$LINEAGE" \
+    -o "$OUTPUT_NAME" \
+    -m transcriptome \
+    -c 16 \
+    --download_path "$DATABASE_DIR" \
+    --out_path "$BUSCO_DIR"
+
+# -----------------------------
+# Final check
+# -----------------------------
+SUMMARY_FILE="$BUSCO_DIR/$OUTPUT_NAME/short_summary.specific.${LINEAGE}.${OUTPUT_NAME}.txt"
+
+if [[ -f "$SUMMARY_FILE" ]]; then
+
+    echo "--------------------------------------"
+    echo " BUSCO assessment completed successfully"
+    echo "Summary file:"
+    echo "$SUMMARY_FILE"
+
+else
+
+    echo "ERROR: BUSCO summary file not found."
+
+    exit 1
+
+fi
+
+echo "======================================"
+echo " BUSCO transcriptome assessment completed"
+echo "======================================"
+
+echo "End time: $(date)"
+
+# -----------------------------
+# Cleanup temporary files
+# -----------------------------
+echo "Cleaning temporary directory..."
+
+rm -rf "$TMP_DIR"
+
+echo "Temporary files removed."
+
+```
+
+Run the script
+[Access busco_assessment.sh](/Scripts/busco_assessment.sh)
+
+```bash
+sbash busco_assessment.sh
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
