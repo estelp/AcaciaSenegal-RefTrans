@@ -1534,7 +1534,7 @@ save the following sbatch script
 #------ Slurm configuration ------
 #SBATCH --job-name=busco_acacia
 #SBATCH --partition=normal
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=12
 #SBATCH --mem=80G
 #SBATCH --time=3-00:00:00
 #SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/busco_%j.out
@@ -1645,7 +1645,7 @@ busco \
     -l "$LINEAGE" \
     -o "$OUTPUT_NAME" \
     -m transcriptome \
-    -c 16 \
+    -c 12 \
     --download_path "$DATABASE_DIR" \
     --out_path "$BUSCO_DIR"
 
@@ -1693,14 +1693,389 @@ Run the script
 sbash busco_assessment.sh
 ```
 
+### Results
+
+***** Results: *****
+
+	C:99.2%[S:14.7%,D:84.5%],F:0.6%,M:0.2%,n:1614	   
+	1602	Complete BUSCOs (C)			   
+	238	Complete and single-copy BUSCOs (S)	   
+	1364	Complete and duplicated BUSCOs (D)	   
+	9	Fragmented BUSCOs (F)			   
+	3	Missing BUSCOs (M)			   
+	1614	Total BUSCO groups searched
+	
+	
+BUSCO analysis using the embryophyta_odb10 lineage dataset revealed a highly complete transcriptome assembly, with 99.2% complete BUSCOs, 0.6% fragmented BUSCOs, and only 0.2% missing BUSCOs. These results indicate a highly comprehensive and biologically representative transcriptome assembly for Acacia senegal.
 
 
 
+# STEP 7 - Transcript Abundance Quantification and Filtering
+
+Transcript abundance estimation will be performed using [salmon](https://combine-lab.github.io/salmon/?utm_source=chatgpt.com) to quantify the expression level of assembled transcripts from the cleaned RNA-seq reads.
+This step provides transcript-level abundance estimates, including TPM (Transcripts Per Million), and helps identify lowly expressed or weakly supported transcripts. The resulting quantification data will be used for downstream transcript filtering and transcriptome refinement.
 
 
+### Running
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano salmon_quantification.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=salmon_quant
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=60G
+#SBATCH --time=2-00:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/salmon_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/salmon_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " Salmon transcript quantification started"
+echo "======================================"
+echo "Start time: $(date)"
+
+# -----------------------------
+# Environment
+# -----------------------------
+MINIFORGE_DIR="$HOME/miniforge3"
+ENV_NAME="trinity_env"
+
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+
+TRIMMED_DIR="$PROJECT_DIR/Data/Trimmed"
+
+ASSEMBLY_FASTA="$PROJECT_DIR/Results/Assembly/Trinity.Trinity.fasta"
+
+SALMON_DIR="$PROJECT_DIR/Results/Salmon"
+
+LOG_DIR="$PROJECT_DIR/logs"
+
+TMP_DIR="/scratch/name/tmp/salmon_${SLURM_JOB_ID}"
+
+# -----------------------------
+# Create directories
+# -----------------------------
+mkdir -p \
+    "$SALMON_DIR" \
+    "$LOG_DIR" \
+    "$TMP_DIR"
+
+export TMPDIR="$TMP_DIR"
+
+# -----------------------------
+# Load conda
+# -----------------------------
+source "$MINIFORGE_DIR/etc/profile.d/conda.sh"
+conda activate "$ENV_NAME"
+
+echo "Using Salmon version:"
+salmon --version
+
+# -----------------------------
+# Check input files
+# -----------------------------
+if [[ ! -f "$ASSEMBLY_FASTA" ]]; then
+    echo "ERROR: Assembly file not found"
+    exit 1
+fi
+
+LEFT_READS=$(ls "$TRIMMED_DIR"/*_trimmed_1.fastq.gz | tr '\n' ',' | sed 's/,$//')
+RIGHT_READS=$(ls "$TRIMMED_DIR"/*_trimmed_2.fastq.gz | tr '\n' ',' | sed 's/,$//')
+
+if [[ -z "$LEFT_READS" || -z "$RIGHT_READS" ]]; then
+    echo "ERROR: Paired reads not found"
+    exit 1
+fi
+
+# -----------------------------
+# Build Salmon index
+# -----------------------------
+echo "Building Salmon index..."
+
+salmon index \
+    -t "$ASSEMBLY_FASTA" \
+    -i "$SALMON_DIR/index" \
+    -k 31
+
+# -----------------------------
+# Quantification
+# -----------------------------
+echo "Running Salmon quantification..."
+
+salmon quant \
+    -i "$SALMON_DIR/index" \
+    -l A \
+    -1 "$LEFT_READS" \
+    -2 "$RIGHT_READS" \
+    -p 12 \
+    --validateMappings \
+    -o "$SALMON_DIR/quant"
+
+# -----------------------------
+# Final check
+# -----------------------------
+if [[ -f "$SALMON_DIR/quant/quant.sf" ]]; then
+    echo "Salmon quantification completed successfully"
+    echo "Output: $SALMON_DIR/quant/quant.sf"
+else
+    echo "ERROR: Salmon output not found"
+    exit 1
+fi
+
+echo "======================================"
+echo " Salmon quantification completed"
+echo "======================================"
+echo "End time: $(date)"
+
+# -----------------------------
+# Cleanup
+# -----------------------------
+rm -rf "$TMP_DIR"
+echo "Temporary files removed"
+```
+
+Run the script
+[Access salmon_quantification.sh](/Scripts/salmon_quantification.sh)
+
+```bash
+sbash salmon_quantification.sh
+```
+
+Explore results
+
+```bash
+ head Results/Salmon/quant/quant.sf
+```
+Name	Length	EffectiveLength	TPM	NumReads
+TRINITY_DN8_c0_g1_i10	1841	1536.010	4.880018	417.987
+TRINITY_DN8_c0_g1_i13	6003	5698.010	3.233971	1027.558
+TRINITY_DN8_c0_g1_i14	3516	3211.010	2.691794	481.981
+TRINITY_DN8_c0_g1_i15	6006	5701.010	1.274408	405.142
+TRINITY_DN8_c0_g1_i19	776	471.790	0.381547	10.038
+TRINITY_DN8_c0_g1_i22	1864	1559.010	5.115066	444.679
+TRINITY_DN8_c0_g1_i24	844	539.374	1.838295	55.291
+TRINITY_DN8_c0_g1_i3	1335	1030.010	4.052610	232.768
+TRINITY_DN8_c0_g1_i4	2866	2561.010	2.926021	417.864
+
+```bash
+wc -l Results/Salmon/quant/quant.sf
+```
+150468 Results/Salmon/quant/quant.sf
+ 
+
+### Transcript filtering (TMP-based)
+
+In this step, we will keep only the transcripts where:
+```
+TPM >= 1
+```
+The TPM (Transcripts Per Million) threshold of ≥ 1 is a standard empirical threshold in transcriptomics used to distinguish between:
+- transcripts that are actually expressed
+- and poorly supported transcripts or assembly noise
+
+The threshold may vary depending on your goal
+| TPM threshold | Usage                                  |
+| ------------- | -------------------------------------- |
+| ≥ 0.1         | Very permissive (exploratory analysis) |
+| ≥ 0.5         | Compromise / moderate filtering        |
+| ≥ 1           | Standard robust threshold              |
+| ≥ 2–5         | Strict (high-confidence annotation)    |
 
 
+#### Running
 
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano transcript_filtering.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#------ Slurm configuration ------
+#SBATCH --job-name=trinity_filter
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=40G
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/filter_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/filter_%j.err
+#SBATCH --nodelist=node06
+
+set -euo pipefail
+
+echo "======================================"
+echo " Transcriptome filtering started"
+echo "======================================"
+echo "Start time: $(date)"
+
+# -----------------------------
+# Variables
+# -----------------------------
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+
+TRINITY_FASTA="$PROJECT_DIR/Results/Assembly/Trinity.Trinity.fasta"
+
+SALMON_QUANT="$PROJECT_DIR/Results/Salmon/quant/quant.sf"
+
+OUTPUT_DIR="$PROJECT_DIR/Results/Filtered"
+
+LOG_DIR="$PROJECT_DIR/logs"
+
+mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
+
+OUTPUT_FASTA="$OUTPUT_DIR/Trinity.filtered.TPM1.fasta"
+
+# -----------------------------
+# Check inputs
+# -----------------------------
+if [[ ! -f "$TRINITY_FASTA" ]]; then
+    echo "ERROR: Trinity FASTA not found"
+    exit 1
+fi
+
+if [[ ! -f "$SALMON_QUANT" ]]; then
+    echo "ERROR: Salmon quant.sf not found"
+    exit 1
+fi
+
+# -----------------------------
+# Filtering step
+# -----------------------------
+echo "Filtering transcripts with TPM >= 1 ..."
+
+awk 'NR==FNR {tpm[$1]=$4; next} 
+/^>/ {header=$1; gsub(">", "", header); 
+if (tpm[header] >= 1) {keep=1} else {keep=0}
+} 
+keep==1' "$SALMON_QUANT" "$TRINITY_FASTA" > "$OUTPUT_FASTA"
+
+# -----------------------------
+# Basic stats
+# -----------------------------
+echo "Counting transcripts before/after filtering..."
+
+echo "Before:"
+grep -c "^>" "$TRINITY_FASTA"
+
+echo "After:"
+grep -c "^>" "$OUTPUT_FASTA"
+
+# -----------------------------
+# Final check
+# -----------------------------
+if [[ -s "$OUTPUT_FASTA" ]]; then
+    echo "Filtering completed successfully"
+    echo "Output file: $OUTPUT_FASTA"
+else
+    echo "ERROR: Filtering failed"
+    exit 1
+fi
+
+echo "======================================"
+echo " Transcriptome filtering completed"
+echo "======================================"
+echo "End time: $(date)"
+```
+
+Run the script
+[Access transcript_filtering.sh](/Scripts/transcript_filtering.sh)
+
+```bash
+sbash transcript_filtering.sh
+```
+
+#### Results
+
+Transcript abundance filtering was performed using a TPM threshold of ≥ 1 based on Salmon quantification results. This step reduced the initial Trinity assembly from 150,467 transcripts to 83,122 transcripts, representing a reduction of approximately 44.8%.
+This reduction indicates the removal of lowly expressed and potentially spurious transcripts, resulting in a more biologically supported and reliable transcriptome for Acacia senegal. The filtered dataset retains the majority of strongly and moderately expressed transcripts while reducing noise and assembly redundancy, providing a solid basis for downstream analyses such as redundancy reduction and functional annotation.
+
+
+# STEP 8 - Redundancy Reduction
+
+## Option 1: CD-HIT
+
+Transcript redundancy was reduced using [CD-HIT](https://github.com/weizhongli/cdhit?utm_source=chatgpt.com) to cluster highly similar sequences from the TPM-filtered transcriptome. This step aims to remove near-identical transcripts and isoform redundancy, producing a non-redundant set of representative sequences for downstream functional annotation and comparative analyses.
+
+
+### Running
+
+Installation of cdhit_env before running
+
+```bash
+conda create -n cdhit_env -c bioconda cd-hit -y
+```
+
+Open the nano text editor to edit a sbatch script
+
+```bash
+nano cdhit_reduction.sh
+```
+
+save the following sbatch script
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=cdhit_reduce
+#SBATCH --partition=normal
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=80G
+#SBATCH --time=2-00:00:00
+#SBATCH --output=/scratch/name/AcaciaSenegal-RefTrans/logs/cdhit_%j.out
+#SBATCH --error=/scratch/name/AcaciaSenegal-RefTrans/logs/cdhit_%j.err
+#SBATCH --nodelist=node06
+
+source ~/miniforge3/etc/profile.d/conda.sh
+
+conda activate cdhit_env
+
+PROJECT_DIR="/scratch/name/AcaciaSenegal-RefTrans"
+
+INPUT_FASTA="$PROJECT_DIR/Results/Filtered/Trinity.filtered.TPM1.fasta"
+
+OUTPUT_FASTA="$PROJECT_DIR/Results/CDHIT/Trinity.filtered.TPM1.cdhit90.fasta"
+
+mkdir -p "$PROJECT_DIR/Results/CDHIT"
+
+cd-hit-est \
+-i "$INPUT_FASTA" \
+-o "$OUTPUT_FASTA" \
+-c 0.90 \
+-n 8 \
+-T 12 \
+-M 0 \
+-d 0 \
+-g 1
+```
+
+Run the script
+[Access cdhit_reduction.sh](/Scripts/cdhit_reduction.sh)
+
+```bash
+sbash cdhit_reduction.sh
+```
+
+### Results
+
+Transcript redundancy reduction was performed using CD-HIT on the TPM-filtered Acacia senegal transcriptome. The initial set of 83,122 transcripts was reduced to 65,885 non-redundant transcripts, corresponding to a reduction of approximately 20.7%.
+This reduction reflects the removal of highly similar sequences, including redundant isoforms and near-identical transcripts generated during de novo assembly. The resulting dataset provides a cleaner and more representative transcriptome, improving downstream functional annotation, reducing redundancy-induced bias, and facilitating more accurate biological interpretation.
+
+
+## Option 2: EvidentialGene (Transcriptome Refinement)
+
+Transcript redundancy reduction and gene-level reconstruction will be performed using [EvidentialGene](http://arthropods.eugenes.org/EvidentialGene/). This pipeline classifies transcripts into biologically meaningful groups by selecting the best representative isoforms per gene based on coding potential, sequence quality, and completeness. Unlike simple similarity-based clustering, this approach prioritizes biologically valid transcripts rather than purely sequence identity.
 
 
 
